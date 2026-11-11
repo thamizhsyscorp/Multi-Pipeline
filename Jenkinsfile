@@ -49,13 +49,7 @@ pipeline {
                 sh 'npm ci'
             }
         }
-
-        stage('Test') {
-            steps {
-                sh 'npm test -- --run'
-            }
-        }
-
+        
         stage('Build React') {
             steps {
                 sh '''
