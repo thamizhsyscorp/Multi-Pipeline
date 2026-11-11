@@ -6,10 +6,6 @@ pipeline {
         timestamps()
     }
 
-    environment {
-        APP_DIR = "${WORKSPACE}"
-    }
-
     stages {
 
         stage('Checkout') {
@@ -17,7 +13,10 @@ pipeline {
                 checkout scm
 
                 sh '''
-                    echo "Current branch: $BRANCH_NAME"
+                    echo "================================"
+                    echo "Building branch: $BRANCH_NAME"
+                    echo "================================"
+
                     node -v
                     npm -v
                 '''
@@ -28,9 +27,9 @@ pipeline {
             steps {
                 script {
                     def ports = [
-                        dev: '3001',
-                        staging: '3002',
-                        main: '3003',
+                        dev       : '3001',
+                        staging   : '3002',
+                        main      : '3003',
                         production: '3004'
                     ]
 
@@ -39,8 +38,12 @@ pipeline {
                     }
 
                     env.PORT = ports[env.BRANCH_NAME]
+                    env.VITE_BRANCH = env.BRANCH_NAME
                     env.PID_FILE = "/tmp/react-${env.BRANCH_NAME}.pid"
                 }
+
+                echo "Branch: ${env.BRANCH_NAME}"
+                echo "Port: ${env.PORT}"
             }
         }
 
@@ -49,10 +52,12 @@ pipeline {
                 sh 'npm ci'
             }
         }
-        
+
         stage('Build React') {
             steps {
                 sh '''
+                    echo "Building React application..."
+
                     npm run build
                 '''
             }
@@ -65,7 +70,8 @@ pipeline {
                         OLD_PID=$(cat "$PID_FILE")
 
                         if kill -0 "$OLD_PID" 2>/dev/null; then
-                            kill "$OLD_PID"
+                            echo "Stopping previous application: $OLD_PID"
+                            kill "$OLD_PID" || true
                             sleep 2
                         fi
 
@@ -78,7 +84,9 @@ pipeline {
         stage('Run React Application') {
             steps {
                 sh '''
-                    nohup npm run preview -- \
+                    echo "Starting React application on port $PORT"
+
+                    JENKINS_NODE_COOKIE=dontKillMe nohup npm run preview -- \
                         --host 0.0.0.0 \
                         --port "$PORT" \
                         --strictPort \
@@ -89,24 +97,31 @@ pipeline {
                     sleep 5
 
                     if ! curl -fsS "http://127.0.0.1:$PORT" > /dev/null; then
+                        echo "Application failed to start!"
                         cat "$WORKSPACE/react-server.log"
                         exit 1
                     fi
-                '''
 
-                echo "React application running on port ${env.PORT}"
+                    echo "Application started successfully!"
+                    echo "URL: http://SERVER-IP:$PORT"
+                '''
             }
         }
     }
 
     post {
         success {
-            echo "Branch: ${env.BRANCH_NAME}"
-            echo "Application running on port: ${env.PORT}"
+            echo """
+                ====================================
+                BUILD SUCCESSFUL
+                Branch: ${env.BRANCH_NAME}
+                Port: ${env.PORT}
+                ====================================
+            """
         }
 
         failure {
-            echo "Pipeline failed: ${env.BRANCH_NAME}"
+            echo "Pipeline failed for branch: ${env.BRANCH_NAME}"
         }
     }
 }
