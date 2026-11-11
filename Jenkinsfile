@@ -2,19 +2,12 @@
 pipeline {
     agent any
 
-    tools {
-        nodejs 'NodeJS'
-    }
-
     options {
         timestamps()
-        disableConcurrentBuilds()
     }
 
     environment {
-        PORT = ''
-        APP_URL = ''
-        PID_FILE = ''
+        APP_DIR = "${WORKSPACE}"
     }
 
     stages {
@@ -22,39 +15,32 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
-                echo "Building branch: ${env.BRANCH_NAME}"
+
+                sh '''
+                    echo "Current branch: $BRANCH_NAME"
+                    node -v
+                    npm -v
+                '''
             }
         }
 
-        stage('Configure Environment') {
+        stage('Configure Port') {
             steps {
                 script {
-                    switch (env.BRANCH_NAME) {
-                        case 'dev':
-                            env.PORT = '3001'
-                            break
+                    def ports = [
+                        dev: '3001',
+                        staging: '3002',
+                        main: '3003',
+                        production: '3004'
+                    ]
 
-                        case 'staging':
-                            env.PORT = '3002'
-                            break
-
-                        case 'main':
-                            env.PORT = '3003'
-                            break
-
-                        case 'production':
-                            env.PORT = '3004'
-                            break
-
-                        default:
-                            error("Unsupported branch: ${env.BRANCH_NAME}")
+                    if (!ports.containsKey(env.BRANCH_NAME)) {
+                        error("Unsupported branch: ${env.BRANCH_NAME}")
                     }
 
-                    env.APP_URL = "http://localhost:${env.PORT}"
+                    env.PORT = ports[env.BRANCH_NAME]
                     env.PID_FILE = "/tmp/react-${env.BRANCH_NAME}.pid"
                 }
-
-                echo "Application port: ${env.PORT}"
             }
         }
 
@@ -72,23 +58,13 @@ pipeline {
 
         stage('Build React') {
             steps {
-                sh 'npm run build'
-                archiveArtifacts artifacts: 'dist/**',
-                                 fingerprint: true
+                sh '''
+                    npm run build
+                '''
             }
         }
 
-        stage('Production Approval') {
-            when {
-                branch 'production'
-            }
-            steps {
-                input message: 'Approve production server startup?',
-                      ok: 'Start Production'
-            }
-        }
-
-        stage('Stop Previous Server') {
+        stage('Stop Previous Application') {
             steps {
                 sh '''
                     if [ -f "$PID_FILE" ]; then
@@ -105,45 +81,26 @@ pipeline {
             }
         }
 
-        stage('Start React Server') {
+        stage('Run React Application') {
             steps {
                 sh '''
-                    JENKINS_NODE_COOKIE=dontKillMe \
-                    nohup ./node_modules/.bin/vite preview \
+                    nohup npm run preview -- \
                         --host 0.0.0.0 \
                         --port "$PORT" \
                         --strictPort \
-                        > "react-server.log" 2>&1 &
+                        > "$WORKSPACE/react-server.log" 2>&1 &
 
                     echo $! > "$PID_FILE"
 
-                    sleep 3
+                    sleep 5
 
-                    if ! kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-                        cat react-server.log
+                    if ! curl -fsS "http://127.0.0.1:$PORT" > /dev/null; then
+                        cat "$WORKSPACE/react-server.log"
                         exit 1
                     fi
                 '''
 
-                echo "React server started on port ${env.PORT}"
-            }
-        }
-
-        stage('Verify Application') {
-            steps {
-                sh '''
-                    for i in $(seq 1 15); do
-                        if curl -fsS "$APP_URL" > /dev/null; then
-                            echo "React application is responding!"
-                            exit 0
-                        fi
-
-                        sleep 2
-                    done
-
-                    cat react-server.log
-                    exit 1
-                '''
+                echo "React application running on port ${env.PORT}"
             }
         }
     }
@@ -151,12 +108,11 @@ pipeline {
     post {
         success {
             echo "Branch: ${env.BRANCH_NAME}"
-            echo "Application: ${env.APP_URL}"
-            echo "Pipeline completed successfully!"
+            echo "Application running on port: ${env.PORT}"
         }
 
         failure {
-            echo "Pipeline failed for ${env.BRANCH_NAME}"
+            echo "Pipeline failed: ${env.BRANCH_NAME}"
         }
     }
 }
