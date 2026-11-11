@@ -23,26 +23,17 @@ pipeline {
             }
         }
 
-        stage('Configure Port') {
+        stage('Configure Production Deployment') {
             steps {
                 script {
-                    def ports = [
-                        dev       : '3001',
-                        staging   : '3002',
-                        main      : '3003',
-                        production: '3004'
-                    ]
-
-                    if (!ports.containsKey(env.BRANCH_NAME)) {
-                        error("Unsupported branch: ${env.BRANCH_NAME}")
-                    }
-
-                    env.PORT = ports[env.BRANCH_NAME]
-                    env.VITE_BRANCH = env.BRANCH_NAME
-                    env.PID_FILE = "/tmp/react-${env.BRANCH_NAME}.pid"
+                    env.DEPLOYMENT_ENV = 'production'
+                    env.PORT = '3004'
+                    env.VITE_BRANCH = env.DEPLOYMENT_ENV
+                    env.PID_FILE = "/tmp/react-${env.DEPLOYMENT_ENV}.pid"
                 }
 
-                echo "Branch: ${env.BRANCH_NAME}"
+                echo "Source branch: ${env.BRANCH_NAME}"
+                echo "Deployment environment: ${env.DEPLOYMENT_ENV}"
                 echo "Port: ${env.PORT}"
             }
         }
@@ -114,7 +105,8 @@ pipeline {
             echo """
                 ====================================
                 BUILD SUCCESSFUL
-                Branch: ${env.BRANCH_NAME}
+                Source branch: ${env.BRANCH_NAME}
+                Deployment environment: ${env.DEPLOYMENT_ENV}
                 Port: ${env.PORT}
                 ====================================
             """
